@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Twitch Chat Alert</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <h1>Twitch Chat Alert</h1>
+      </header>
+
+      <div class="tabs" role="tablist" aria-label="Configurações do aviso">
+        <button class="tab-button active" type="button" data-tab="general" role="tab" aria-selected="true">Geral</button>
+        <button class="tab-button" type="button" data-tab="sound" role="tab" aria-selected="false">Som</button>
+        <button class="tab-button" type="button" data-tab="filters" role="tab" aria-selected="false">Filtros</button>
+      </div>
+
+      <section class="tab-content active" data-content="general">
+        <div class="section-block">
+          <div class="section-title">Aviso</div>
+
+          <label class="switch-row" for="enabledToggle">
+            <span>Ativar aviso</span>
+            <input id="enabledToggle" type="checkbox" />
+          </label>
+
+          <label class="slider-row" for="volumeSlider">
+            <span>Volume</span>
+            <input id="volumeSlider" type="range" min="0.1" max="1" step="0.05" value="0.7" />
+          </label>
+        </div>
+
+        <div class="section-block">
+          <div class="section-title">Canal</div>
+
+          <div class="panel">
+            <label class="field-label" for="channelNameInput">Canal</label>
+            <input id="channelNameInput" type="text" placeholder="nome-do-canal" />
+            <div class="toggle-row">
+              <span id="currentChannelText">Abra uma stream</span>
+              <label class="mini-switch">
+                <input id="channelToggle" type="checkbox" />
+                <span>Ativar</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-content" data-content="sound">
+        <div class="section-block">
+          <div class="section-title">Som</div>
+
+          <div class="panel sound-panel">
+            <label class="field-label" for="soundSelect">Som</label>
+            <select id="soundSelect"></select>
+            <div class="sound-actions">
+              <button id="testButton" type="button" class="secondary">Testar som</button>
+            </div>
+
+            <div class="custom-sound">
+              <label class="field-label" for="customSoundName">Adicionar som</label>
+              <input id="customSoundName" type="text" placeholder="Nome do som" />
+              <input id="customSoundUrl" type="url" placeholder="https://.../som.mp3" />
+              <button id="addSoundButton" type="button" class="secondary">Adicionar URL</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-content" data-content="filters">
+        <div class="section-block">
+          <div class="section-title">Filtros</div>
+
+          <div class="panel">
+            <label class="field-label" for="ignoredUsersInput">Ignorar usuários</label>
+            <input id="ignoredUsersInput" type="text" placeholder="streamelements, streamlabs, nightbot" />
+          </div>
+
+          <div class="panel">
+            <label class="field-label" for="alertCooldownSlider">Intervalo mínimo</label>
+            <input id="alertCooldownSlider" type="range" min="0" max="8000" step="250" value="2000" />
+            <div class="cooldown-label"><span id="alertCooldownValue">2s</span></div>
+          </div>
+
+          <div class="panel">
+            <label class="field-label" for="alertDebounceSlider">Pausa para disparar</label>
+            <input id="alertDebounceSlider" type="range" min="250" max="4000" step="250" value="1400" />
+            <div class="cooldown-label"><span id="alertDebounceValue">1.4s</span></div>
+          </div>
+
+          <div class="panel">
+            <label class="field-label" for="myUsernameInput">Seu nome de usuário</label>
+            <input id="myUsernameInput" type="text" placeholder="seu_usuario" />
+            <label class="mini-switch inline-block">
+              <input id="ignoreOwnMessagesToggle" type="checkbox" checked />
+              <span>Ignorar minhas mensagens</span>
+            </label>
+            <label class="mini-switch inline-block">
+              <input id="mentionOnlyToggle" type="checkbox" />
+              <span>Somente quando me mencionarem</span>
+            </label>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

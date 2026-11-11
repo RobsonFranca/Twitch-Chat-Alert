@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Twitch Chat Alert",
+  "version": "0.1.0",
+  "description": "Toca um aviso sonoro quando chega uma mensagem nova no chat da Twitch.",
+  "permissions": ["storage"],
+  "host_permissions": ["*://*.twitch.tv/*"],
+  "action": {
+    "default_title": "Twitch Chat Alert",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.twitch.tv/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
