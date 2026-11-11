@@ -1,27 +1,3 @@
-const DEFAULT_SOUNDS = [
-  { id: 'tone-1', name: 'Tom 1', type: 'tone', waveform: 'sine', frequency: 880, duration: 0.28 },
-  { id: 'tone-2', name: 'Tom 2', type: 'tone', waveform: 'triangle', frequency: 660, duration: 0.34 },
-  { id: 'tone-3', name: 'Chime', type: 'tone', waveform: 'square', frequency: 1046.5, duration: 0.22, sequence: [
-    { frequency: 1046.5, duration: 0.18 },
-    { frequency: 1318.5, duration: 0.14 }
-  ] },
-  { id: 'tone-4', name: 'Bass', type: 'tone', waveform: 'sawtooth', frequency: 220, duration: 0.42 }
-];
-
-const DEFAULT_SETTINGS = {
-  enabled: true,
-  volume: 0.7,
-  selectedSoundId: 'tone-1',
-  sounds: DEFAULT_SOUNDS,
-  channelSettings: {},
-  ignoreOwnMessages: true,
-  mentionOnly: false,
-  myUsername: '',
-  ignoredUsers: ['streamelements', 'streamlabs', 'nightbot', 'moobot'],
-  alertCooldownMs: 2000,
-  alertDebounceMs: 1400
-};
-
 let settings = { ...DEFAULT_SETTINGS };
 let chatObserver = null;
 let waitingObserver = null;
@@ -61,9 +37,7 @@ function getStoredSettings() {
 }
 
 function getCurrentChannelName() {
-  const segments = window.location.pathname.split('/').filter(Boolean);
-  const candidate = segments.find((segment) => !['chat', 'videos', 'directory', 'popout', 'moderator', 'dashboard', 'settings', 'search'].includes(segment.toLowerCase()));
-  return normalizeChannelName(candidate || segments[0] || '');
+  return normalizeChannelName(window.location.pathname);
 }
 
 function getRootCandidates() {
@@ -102,47 +76,7 @@ function isChannelEnabled() {
 }
 
 function setStatusIcon(color) {
-  if (!chrome?.action) {
-    return;
-  }
-
-  try {
-    const sizes = [16, 32, 48, 128];
-    const imageData = {};
-
-    sizes.forEach((size) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext('2d');
-
-      ctx.clearRect(0, 0, size, size);
-
-      ctx.fillStyle = '#1f2937';
-      ctx.fillRect(0, 0, size, size);
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `700 ${size * 0.72}px Arial`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('T', size / 2, size / 2 + 1);
-
-      const dotRadius = Math.max(3, size * 0.18);
-      const dotX = size - dotRadius - Math.max(1, size * 0.12);
-      const dotY = size - dotRadius - Math.max(1, size * 0.12);
-
-      ctx.beginPath();
-      ctx.fillStyle = color;
-      ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
-      ctx.fill();
-
-      imageData[size] = ctx.getImageData(0, 0, size, size);
-    });
-
-    chrome.action.setIcon({ imageData });
-  } catch (error) {
-    // Ignore badge update failures silently.
-  }
+  chrome.runtime.sendMessage({ type: 'status', color }).catch(() => {});
 }
 
 function updateExtensionBadge() {
@@ -166,66 +100,12 @@ function getSelectedSound() {
   return list.find((sound) => sound.id === settings.selectedSoundId) || list[0];
 }
 
-function playAudioFromUrl(url) {
-  const audio = new Audio(url);
-  audio.volume = settings.volume;
-  audio.play().catch(() => {});
-}
-
-function playToneSound(sound) {
-  const AudioCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtor) {
-    return;
-  }
-
-  const audioContext = new AudioCtor();
-  const gainNode = audioContext.createGain();
-  const now = audioContext.currentTime;
-
-  gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(settings.volume, now + 0.02);
-  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + (sound.duration || 0.3));
-
-  const sequence = Array.isArray(sound.sequence) && sound.sequence.length ? sound.sequence : [{ frequency: sound.frequency || 880, duration: sound.duration || 0.3, waveform: sound.waveform || 'sine' }];
-
-  sequence.forEach((entry, index) => {
-    const oscillator = audioContext.createOscillator();
-    oscillator.type = entry.waveform || sound.waveform || 'sine';
-    oscillator.frequency.setValueAtTime(entry.frequency || sound.frequency || 880, now + index * 0.05);
-    oscillator.connect(gainNode);
-    oscillator.start(now + index * 0.05);
-    oscillator.stop(now + index * 0.05 + (entry.duration || sound.duration || 0.3));
-  });
-
-  gainNode.connect(audioContext.destination);
-}
-
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeName(value) {
   return String(value || '').trim().toLowerCase();
-}
-
-function normalizeChannelName(value) {
-  let raw = String(value || '').trim();
-  if (!raw) {
-    return '';
-  }
-
-  try {
-    const url = new URL(raw);
-    raw = url.pathname;
-  } catch {
-    // keeps raw value when it is not a full URL
-  }
-
-  raw = raw.toLowerCase().replace(/^@/, '');
-  const segments = raw.split('/').filter(Boolean);
-  const candidate = segments.find((segment) => !['chat', 'videos', 'directory', 'popout', 'moderator', 'dashboard', 'settings', 'search'].includes(segment.toLowerCase()));
-  const cleaned = (candidate || segments[0] || raw).replace(/^@/, '').trim();
-  return cleaned.toLowerCase();
 }
 
 function getAuthorName(element) {
@@ -255,7 +135,7 @@ function isIgnoredUser(element) {
 function isMentionedMessage(element) {
   const username = normalizeName(settings.myUsername);
   if (!username) {
-    return true;
+    return false;
   }
 
   const text = (element.textContent || '').toLowerCase();
@@ -291,12 +171,7 @@ function playSelectedSound() {
     return;
   }
 
-  if (sound.type === 'url' && sound.url) {
-    playAudioFromUrl(sound.url);
-    return;
-  }
-
-  playToneSound(sound);
+  playAlertSound(sound, settings.volume).catch(() => {});
 }
 
 function queueAlert() {
@@ -331,7 +206,7 @@ function queueAlert() {
     if (Date.now() - lastAlertAt >= (settings.alertCooldownMs || 0)) {
       playSelectedSound();
     }
-  }, settings.alertDebounceMs || 1200);
+  }, Math.max(settings.alertDebounceMs ?? 1400, (settings.alertCooldownMs ?? 0) - (Date.now() - lastAlertAt)));
 }
 
 function markMessageAsHandled(element) {
@@ -442,7 +317,8 @@ async function start() {
   settings = await getStoredSettings();
   startupIgnoreUntil = Date.now() + 6000;
 
-  chrome.storage.onChanged.addListener((changes) => {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
     clearPendingAlert();
 
     if (changes.enabled) {
@@ -512,6 +388,20 @@ async function start() {
 
   updateExtensionBadge();
   setupObserver();
+  let previousPath = location.pathname;
+  let previousRoots = getRootCandidates();
+  setInterval(() => {
+    const roots = getRootCandidates();
+    const navigated = previousPath !== location.pathname;
+    if (navigated || roots.length !== previousRoots.length || roots.some((root, i) => root !== previousRoots[i])) {
+      clearPendingAlert();
+      if (navigated) { startupIgnoreUntil = Date.now() + 1500; lastAlertAt = 0; }
+      previousPath = location.pathname;
+      previousRoots = roots;
+      setupObserver();
+      updateExtensionBadge();
+    }
+  }, 1000);
 }
 
 start();

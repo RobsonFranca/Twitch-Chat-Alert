@@ -1,27 +1,3 @@
-const DEFAULT_SOUNDS = [
-  { id: 'tone-1', name: 'Tom 1', type: 'tone', waveform: 'sine', frequency: 880, duration: 0.28 },
-  { id: 'tone-2', name: 'Tom 2', type: 'tone', waveform: 'triangle', frequency: 660, duration: 0.34 },
-  { id: 'tone-3', name: 'Chime', type: 'tone', waveform: 'square', frequency: 1046.5, duration: 0.22, sequence: [
-    { frequency: 1046.5, duration: 0.18 },
-    { frequency: 1318.5, duration: 0.14 }
-  ] },
-  { id: 'tone-4', name: 'Bass', type: 'tone', waveform: 'sawtooth', frequency: 220, duration: 0.42 }
-];
-
-const DEFAULT_SETTINGS = {
-  enabled: true,
-  volume: 0.7,
-  selectedSoundId: 'tone-1',
-  sounds: DEFAULT_SOUNDS,
-  channelSettings: {},
-  ignoreOwnMessages: true,
-  mentionOnly: false,
-  myUsername: '',
-  ignoredUsers: ['streamelements', 'streamlabs', 'nightbot', 'moobot'],
-  alertCooldownMs: 2000,
-  alertDebounceMs: 1400
-};
-
 const enabledToggle = document.getElementById('enabledToggle');
 const volumeSlider = document.getElementById('volumeSlider');
 const testButton = document.getElementById('testButton');
@@ -31,9 +7,7 @@ const customSoundUrl = document.getElementById('customSoundUrl');
 const addSoundButton = document.getElementById('addSoundButton');
 const channelNameInput = document.getElementById('channelNameInput');
 const channelToggle = document.getElementById('channelToggle');
-const channelToggleLabel = document.getElementById('channelToggleLabel');
 const currentChannelText = document.getElementById('currentChannelText');
-const channelStatusBadge = document.getElementById('channelStatusBadge');
 const ignoreOwnMessagesToggle = document.getElementById('ignoreOwnMessagesToggle');
 const mentionOnlyToggle = document.getElementById('mentionOnlyToggle');
 const myUsernameInput = document.getElementById('myUsernameInput');
@@ -83,26 +57,6 @@ async function renderSoundOptions() {
   soundSelect.value = settings.selectedSoundId || settings.sounds[0]?.id || '';
 }
 
-function normalizeChannelName(value) {
-  let raw = String(value || '').trim();
-  if (!raw) {
-    return '';
-  }
-
-  try {
-    const url = new URL(raw);
-    raw = url.pathname;
-  } catch {
-    // keeps raw value when it is not a full URL
-  }
-
-  raw = raw.toLowerCase().replace(/^@/, '');
-  const segments = raw.split('/').filter(Boolean);
-  const candidate = segments.find((segment) => !['chat', 'videos', 'directory', 'popout', 'moderator', 'dashboard', 'settings', 'search'].includes(segment.toLowerCase()));
-  const cleaned = (candidate || segments[0] || raw).replace(/^@/, '').trim();
-  return cleaned.toLowerCase();
-}
-
 async function getCurrentTwitchChannel() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const [tab] = tabs;
@@ -119,7 +73,7 @@ async function getCurrentTwitchChannel() {
 
     const segments = url.pathname.split('/').filter(Boolean);
     const candidate = segments.find((segment) => !['chat', 'videos', 'directory', 'popout', 'moderator', 'dashboard', 'settings', 'search'].includes(segment.toLowerCase()));
-    return normalizeChannelName(candidate || segments[0] || '');
+    return normalizeChannelName(url.pathname);
   } catch {
     return '';
   }
@@ -141,21 +95,14 @@ async function isCurrentTabOnTwitch() {
   }
 }
 
-function updateChannelStatus() {
-  const isEnabled = channelToggle.checked;
-  channelToggleLabel.textContent = isEnabled ? 'Canal ativado' : 'Ativar canal';
-  channelStatusBadge.textContent = isEnabled ? 'Ligado' : 'Desligado';
-  channelStatusBadge.classList.toggle('status-on', isEnabled);
-  channelStatusBadge.classList.toggle('status-off', !isEnabled);
-}
-
 async function syncChannelFields() {
   const settings = await getStorageSettings();
   const currentChannel = await getCurrentTwitchChannel();
 
-  if (currentChannel) {
-    channelNameInput.value = currentChannel;
-    currentChannelText.textContent = `Canal atual: ${currentChannel}`;
+  const requestedChannel = normalizeChannelName(channelNameInput.value) || currentChannel;
+  if (requestedChannel) {
+    channelNameInput.value = requestedChannel;
+    currentChannelText.textContent = `Configurando: ${requestedChannel}`;
   } else {
     channelNameInput.value = '';
     currentChannelText.textContent = 'Abra uma stream da Twitch para usar o canal atual';
@@ -165,51 +112,11 @@ async function syncChannelFields() {
   const isOnTwitch = Boolean(channel);
   channelToggle.disabled = !isOnTwitch;
   channelToggle.checked = Boolean(isOnTwitch && settings.channelSettings?.[channel]?.enabled === true);
-  updateChannelStatus();
 }
 
-function setStatusIcon(color) {
-  if (!chrome?.action) {
-    return;
-  }
-
-  try {
-    const sizes = [16, 32, 48, 128];
-    const imageData = {};
-
-    sizes.forEach((size) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext('2d');
-
-      ctx.clearRect(0, 0, size, size);
-
-      ctx.fillStyle = '#1f2937';
-      ctx.fillRect(0, 0, size, size);
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = `700 ${size * 0.72}px Arial`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('T', size / 2, size / 2 + 1);
-
-      const dotRadius = Math.max(3, size * 0.18);
-      const dotX = size - dotRadius - Math.max(1, size * 0.12);
-      const dotY = size - dotRadius - Math.max(1, size * 0.12);
-
-      ctx.beginPath();
-      ctx.fillStyle = color;
-      ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
-      ctx.fill();
-
-      imageData[size] = ctx.getImageData(0, 0, size, size);
-    });
-
-    chrome.action.setIcon({ imageData });
-  } catch (error) {
-    // Ignore badge update failures silently.
-  }
+async function setStatusIcon(color) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) await chrome.runtime.sendMessage({ type: 'status', color, tabId: tab.id });
 }
 
 function updateExtensionBadgeForCurrentTab(state) {
@@ -224,9 +131,7 @@ function updateExtensionBadgeForCurrentTab(state) {
 }
 
 async function saveSettings({ updateChannel = false } = {}) {
-  if (!(await isCurrentTabOnTwitch())) {
-    return;
-  }
+  if (!(await isCurrentTabOnTwitch())) return;
 
   const settings = await getStorageSettings();
   const nextSettings = {
@@ -275,59 +180,37 @@ async function saveSettings({ updateChannel = false } = {}) {
     updateExtensionBadgeForCurrentTab('green');
   }
 
-  chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-    if (tab?.id) {
-      chrome.tabs.sendMessage(tab.id, {
-        type: 'setSettings',
-        settings: nextSettings
-      });
-    }
-  });
 }
 
 async function playTestSound() {
+  if (!(await isCurrentTabOnTwitch())) return;
   const resolvedSettings = await getStorageSettings();
   const selectedSound = (resolvedSettings.sounds || []).find((sound) => sound.id === soundSelect.value)
     || resolvedSettings.sounds[0]
     || DEFAULT_SOUNDS[0];
 
-  if (selectedSound.type === 'url' && selectedSound.url) {
-    const audio = new Audio(selectedSound.url);
-    audio.volume = Number(volumeSlider.value);
-    audio.play().catch(() => {});
-    return;
-  }
+  try {
+    await playAlertSound(selectedSound, Number(volumeSlider.value));
+    showFeedback('Som reproduzido.');
+  } catch { showFeedback('Não foi possível tocar. Confira a URL e a permissão de áudio.', true); }
+}
 
-  const AudioCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtor) {
-    return;
-  }
-
-  const context = new AudioCtor();
-  const oscillator = context.createOscillator();
-  const gainNode = context.createGain();
-  const now = context.currentTime;
-
-  oscillator.type = selectedSound.waveform || 'sine';
-  oscillator.frequency.setValueAtTime(selectedSound.frequency || 880, now);
-  gainNode.gain.setValueAtTime(0.0001, now);
-  gainNode.gain.exponentialRampToValueAtTime(Number(volumeSlider.value), now + 0.02);
-  gainNode.gain.exponentialRampToValueAtTime(0.0001, now + (selectedSound.duration || 0.3));
-
-  oscillator.connect(gainNode);
-  gainNode.connect(context.destination);
-  oscillator.start(now);
-  oscillator.stop(now + (selectedSound.duration || 0.3));
+function showFeedback(message, error = false) {
+  const feedback = document.getElementById('feedback');
+  feedback.textContent = message;
+  feedback.classList.toggle('error', error);
 }
 
 async function addCustomSound() {
+  if (!(await isCurrentTabOnTwitch())) return;
   const settings = await getStorageSettings();
   const name = customSoundName.value.trim();
   const url = customSoundUrl.value.trim();
 
-  if (!name || !url) {
-    return;
-  }
+  if (!name || !url) { showFeedback('Preencha o nome e a URL do som.', true); return; }
+  try {
+    if (new URL(url).protocol !== 'https:') throw new Error();
+  } catch { showFeedback('Use uma URL de áudio válida com HTTPS.', true); return; }
 
   const sounds = Array.isArray(settings.sounds) ? [...settings.sounds] : [...DEFAULT_SOUNDS];
   const customSound = {
@@ -358,22 +241,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const canUseExtension = await isCurrentTabOnTwitch();
   const siteGuardMessage = document.getElementById('siteGuardMessage');
 
-  const disablePopupControls = () => {
-    [enabledToggle, volumeSlider, testButton, soundSelect, customSoundName, customSoundUrl, addSoundButton,
-      channelNameInput, channelToggle, ignoreOwnMessagesToggle, mentionOnlyToggle, myUsernameInput,
-      alertCooldownSlider, alertDebounceSlider, ignoredUsersInput].forEach((element) => {
-      if (element) {
-        element.disabled = true;
-      }
-    });
-
-    updateExtensionBadgeForCurrentTab('gray');
-
-    if (siteGuardMessage) {
-      siteGuardMessage.classList.remove('hidden');
-    }
-  };
-
   const enablePopupControls = () => {
     [enabledToggle, volumeSlider, testButton, soundSelect, customSoundName, customSoundUrl, addSoundButton,
       channelNameInput, channelToggle, ignoreOwnMessagesToggle, mentionOnlyToggle, myUsernameInput,
@@ -389,16 +256,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   if (!canUseExtension) {
-    disablePopupControls();
+    document.querySelectorAll('input, select, button').forEach(element => {
+      element.disabled = true;
+    });
+    siteGuardMessage.classList.remove('hidden');
   } else {
     enablePopupControls();
   }
 
   enabledToggle.checked = settings.enabled;
   volumeSlider.value = String(settings.volume);
-  alertCooldownSlider.value = String(settings.alertCooldownMs || 2000);
+  document.getElementById('volumeValue').textContent = `${Math.round(settings.volume * 100)}%`;
+  alertCooldownSlider.value = String(settings.alertCooldownMs ?? 2000);
   alertCooldownValue.textContent = `${Number(alertCooldownSlider.value) / 1000}s`;
-  alertDebounceSlider.value = String(settings.alertDebounceMs || 1400);
+  alertDebounceSlider.value = String(settings.alertDebounceMs ?? 1400);
   alertDebounceValue.textContent = `${Number(alertDebounceSlider.value) / 1000}s`;
   ignoredUsersInput.value = Array.isArray(settings.ignoredUsers) ? settings.ignoredUsers.join(', ') : '';
   ignoreOwnMessagesToggle.checked = settings.ignoreOwnMessages !== false;
@@ -407,6 +278,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await renderSoundOptions();
   soundSelect.value = settings.selectedSoundId || settings.sounds[0]?.id || '';
   await syncChannelFields();
+  if (!canUseExtension) enabledToggle.checked = false;
 
   if (!canUseExtension) {
     updateExtensionBadgeForCurrentTab('gray');
@@ -444,7 +316,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   enabledToggle.addEventListener('change', () => saveSettings());
-  volumeSlider.addEventListener('input', () => saveSettings());
+  volumeSlider.addEventListener('input', () => {
+    document.getElementById('volumeValue').textContent = `${Math.round(Number(volumeSlider.value) * 100)}%`;
+    saveSettings();
+  });
   alertCooldownSlider.addEventListener('input', () => {
     alertCooldownValue.textContent = `${Number(alertCooldownSlider.value) / 1000}s`;
     saveSettings();
@@ -461,11 +336,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   testButton.addEventListener('click', playTestSound);
   addSoundButton.addEventListener('click', addCustomSound);
   channelToggle.addEventListener('change', async () => {
-    updateChannelStatus();
     await saveSettings({ updateChannel: true });
   });
   channelNameInput.addEventListener('change', async () => {
     await syncChannelFields();
-    await saveSettings({ updateChannel: true });
   });
 });

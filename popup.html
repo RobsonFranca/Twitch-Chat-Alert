@@ -9,6 +9,7 @@
   <body>
     <main class="popup">
       <header class="header">
+        <img class="brand-icon" src="icons/icon-48.png" width="44" height="44" alt="" />
         <h1>Twitch Chat Alert</h1>
       </header>
 
@@ -25,30 +26,29 @@
           <div class="section-title">Aviso</div>
 
           <label class="switch-row" for="enabledToggle">
-            <span>Ativar aviso</span>
+            <span><strong>Alertas sonoros</strong><small>Escolha os canais que você quer ouvir.</small></span>
             <input id="enabledToggle" type="checkbox" />
           </label>
 
           <label class="slider-row" for="volumeSlider">
-            <span>Volume</span>
-            <input id="volumeSlider" type="range" min="0.1" max="1" step="0.05" value="0.7" />
+            <span>Volume <output id="volumeValue">70%</output></span>
+            <input id="volumeSlider" type="range" min="0" max="1" step="0.05" value="0.7" />
           </label>
         </div>
 
         <div class="section-block">
-          <div class="section-title">Canal</div>
+          <div class="section-title">Seus canais</div><p class="help">Ative cada canal para começar a receber os avisos.</p>
 
           <div class="panel">
             <label class="field-label" for="channelNameInput">Canal</label>
             <input id="channelNameInput" type="text" placeholder="nome-do-canal" />
             <div class="channel-summary">
               <span id="currentChannelText">Abra uma stream</span>
-              <span id="channelStatusBadge" class="status-badge status-off">Desligado</span>
             </div>
             <div class="toggle-row">
               <label class="mini-switch">
                 <input id="channelToggle" type="checkbox" />
-                <span id="channelToggleLabel">Ativar canal</span>
+                <span>Ativar canal</span>
               </label>
             </div>
           </div>
@@ -69,6 +69,7 @@
             <div class="custom-sound">
               <label class="field-label" for="customSoundName">Adicionar som</label>
               <input id="customSoundName" type="text" placeholder="Nome do som" />
+              <label class="field-label" for="customSoundUrl">URL do áudio (HTTPS)</label>
               <input id="customSoundUrl" type="url" placeholder="https://.../som.mp3" />
               <button id="addSoundButton" type="button" class="secondary">Adicionar URL</button>
             </div>
@@ -93,7 +94,7 @@
 
           <div class="panel">
             <label class="field-label" for="alertDebounceSlider">Pausa para disparar</label>
-            <input id="alertDebounceSlider" type="range" min="250" max="4000" step="250" value="1400" />
+            <input id="alertDebounceSlider" type="range" min="250" max="4000" step="100" value="1400" />
             <div class="cooldown-label"><span id="alertDebounceValue">1.4s</span></div>
           </div>
 
@@ -111,8 +112,11 @@
           </div>
         </div>
       </section>
+      <p id="feedback" role="status" aria-live="polite"></p>
+      <footer><span>Salvo automaticamente</span></footer>
     </main>
 
+    <script src="shared.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>
