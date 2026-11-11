@@ -12,6 +12,8 @@
         <h1>Twitch Chat Alert</h1>
       </header>
 
+      <div id="siteGuardMessage" class="site-guard hidden">Abra uma live da Twitch para usar o aviso.</div>
+
       <div class="tabs" role="tablist" aria-label="Configurações do aviso">
         <button class="tab-button active" type="button" data-tab="general" role="tab" aria-selected="true">Geral</button>
         <button class="tab-button" type="button" data-tab="sound" role="tab" aria-selected="false">Som</button>
@@ -39,11 +41,14 @@
           <div class="panel">
             <label class="field-label" for="channelNameInput">Canal</label>
             <input id="channelNameInput" type="text" placeholder="nome-do-canal" />
-            <div class="toggle-row">
+            <div class="channel-summary">
               <span id="currentChannelText">Abra uma stream</span>
+              <span id="channelStatusBadge" class="status-badge status-off">Desligado</span>
+            </div>
+            <div class="toggle-row">
               <label class="mini-switch">
                 <input id="channelToggle" type="checkbox" />
-                <span>Ativar</span>
+                <span id="channelToggleLabel">Ativar canal</span>
               </label>
             </div>
           </div>

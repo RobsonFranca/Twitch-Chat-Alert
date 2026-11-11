@@ -31,20 +31,55 @@ let pendingAlertTimer = null;
 const MESSAGE_SELECTOR = 'div[data-a-target="chat-line-message"], .chat-line__message, [data-test-selector="chat-line-message"]';
 const MESSAGE_PREFIX = 'twitchChatAlertMarked';
 
+function normalizeChannelSettingsMap(map) {
+  if (!map || typeof map !== 'object') {
+    return {};
+  }
+
+  const normalized = {};
+  Object.entries(map).forEach(([key, value]) => {
+    const normalizedKey = normalizeChannelName(key);
+    if (!normalizedKey) {
+      return;
+    }
+
+    normalized[normalizedKey] = value && typeof value === 'object' ? { ...value } : { enabled: Boolean(value) };
+  });
+
+  return normalized;
+}
+
 function getStoredSettings() {
   return new Promise((resolve) => {
     chrome.storage.local.get(DEFAULT_SETTINGS, (items) => {
       const mergedItems = { ...DEFAULT_SETTINGS, ...items };
       mergedItems.sounds = Array.isArray(items.sounds) && items.sounds.length ? items.sounds : DEFAULT_SOUNDS;
-      mergedItems.channelSettings = items.channelSettings || {};
+      mergedItems.channelSettings = normalizeChannelSettingsMap(items.channelSettings || {});
       resolve(mergedItems);
     });
   });
 }
 
 function getCurrentChannelName() {
-  const match = window.location.pathname.match(/^\/([^/?#]+)/);
-  return match ? match[1].trim().toLowerCase() : '';
+  const segments = window.location.pathname.split('/').filter(Boolean);
+  const candidate = segments.find((segment) => !['chat', 'videos', 'directory', 'popout', 'moderator', 'dashboard', 'settings', 'search'].includes(segment.toLowerCase()));
+  return normalizeChannelName(candidate || segments[0] || '');
+}
+
+function getRootCandidates() {
+  return [
+    document.querySelector('#chat-scrollable-area'),
+    document.querySelector('.chat-scrollable-area__message-container'),
+    document.querySelector('.chat-scrollable-area'),
+    document.querySelector('[data-a-target="chat-scrollable-area__message-container"]')
+  ].filter(Boolean);
+}
+
+function clearPendingAlert() {
+  if (pendingAlertTimer) {
+    clearTimeout(pendingAlertTimer);
+    pendingAlertTimer = null;
+  }
 }
 
 function isChannelEnabled() {
@@ -54,11 +89,76 @@ function isChannelEnabled() {
   }
 
   const channelState = settings.channelSettings && settings.channelSettings[channel];
-  if (channelState === undefined) {
-    return settings.enabled;
+  if (channelState !== undefined) {
+    return Boolean(channelState.enabled);
   }
 
-  return Boolean(channelState.enabled);
+  const matchingLegacyChannel = Object.entries(settings.channelSettings || {}).find(([key]) => normalizeChannelName(key) === channel);
+  if (matchingLegacyChannel) {
+    return Boolean(matchingLegacyChannel[1].enabled);
+  }
+
+  return false;
+}
+
+function setStatusIcon(color) {
+  if (!chrome?.action) {
+    return;
+  }
+
+  try {
+    const sizes = [16, 32, 48, 128];
+    const imageData = {};
+
+    sizes.forEach((size) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      ctx.clearRect(0, 0, size, size);
+
+      ctx.fillStyle = '#1f2937';
+      ctx.fillRect(0, 0, size, size);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `700 ${size * 0.72}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('T', size / 2, size / 2 + 1);
+
+      const dotRadius = Math.max(3, size * 0.18);
+      const dotX = size - dotRadius - Math.max(1, size * 0.12);
+      const dotY = size - dotRadius - Math.max(1, size * 0.12);
+
+      ctx.beginPath();
+      ctx.fillStyle = color;
+      ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      imageData[size] = ctx.getImageData(0, 0, size, size);
+    });
+
+    chrome.action.setIcon({ imageData });
+  } catch (error) {
+    // Ignore badge update failures silently.
+  }
+}
+
+function updateExtensionBadge() {
+  let color = '#6b7280';
+
+  if (!settings.enabled) {
+    color = '#6b7280';
+  } else if (isChannelEnabled()) {
+    color = '#22c55e';
+  } else if (getCurrentChannelName()) {
+    color = '#ef4444';
+  } else {
+    color = '#6b7280';
+  }
+
+  setStatusIcon(color);
 }
 
 function getSelectedSound() {
@@ -108,6 +208,26 @@ function normalizeName(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeChannelName(value) {
+  let raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const url = new URL(raw);
+    raw = url.pathname;
+  } catch {
+    // keeps raw value when it is not a full URL
+  }
+
+  raw = raw.toLowerCase().replace(/^@/, '');
+  const segments = raw.split('/').filter(Boolean);
+  const candidate = segments.find((segment) => !['chat', 'videos', 'directory', 'popout', 'moderator', 'dashboard', 'settings', 'search'].includes(segment.toLowerCase()));
+  const cleaned = (candidate || segments[0] || raw).replace(/^@/, '').trim();
+  return cleaned.toLowerCase();
+}
+
 function getAuthorName(element) {
   const authorNode = element.querySelector('[data-a-target="chat-message-username"], .chat-author__display-name, .chat-line__username, .username');
   if (authorNode) {
@@ -154,6 +274,11 @@ function isOwnMessage(element) {
 }
 
 function playSelectedSound() {
+  const channel = getCurrentChannelName();
+  if (!settings.enabled || !isChannelEnabled()) {
+    return;
+  }
+
   const now = Date.now();
   if (now - lastAlertAt < (settings.alertCooldownMs || 0)) {
     return;
@@ -175,12 +300,34 @@ function playSelectedSound() {
 }
 
 function queueAlert() {
-  if (pendingAlertTimer) {
-    clearTimeout(pendingAlertTimer);
+  const channel = getCurrentChannelName();
+  if (!settings.enabled || !isChannelEnabled()) {
+    clearPendingAlert();
+    return;
   }
+
+  const roots = getRootCandidates();
+  const hasChatMessages = roots.some((root) => root.querySelector(MESSAGE_SELECTOR));
+  if (!hasChatMessages) {
+    clearPendingAlert();
+    return;
+  }
+
+  clearPendingAlert();
 
   pendingAlertTimer = setTimeout(() => {
     pendingAlertTimer = null;
+
+    if (!settings.enabled || !isChannelEnabled()) {
+      return;
+    }
+
+    const freshRoots = getRootCandidates();
+    const stillHasMessages = freshRoots.some((root) => root.querySelector(MESSAGE_SELECTOR));
+    if (!stillHasMessages) {
+      return;
+    }
+
     if (Date.now() - lastAlertAt >= (settings.alertCooldownMs || 0)) {
       playSelectedSound();
     }
@@ -251,14 +398,10 @@ function processMutations(mutations) {
 }
 
 function setupObserver() {
-  const rootCandidates = [
-    document.querySelector('#chat-scrollable-area'),
-    document.querySelector('.chat-scrollable-area__message-container'),
-    document.querySelector('.chat-scrollable-area'),
-    document.querySelector('[data-a-target="chat-scrollable-area__message-container"]')
-  ].filter(Boolean);
+  const rootCandidates = getRootCandidates();
 
   if (rootCandidates.length === 0) {
+    clearPendingAlert();
     if (waitingObserver) {
       return;
     }
@@ -300,6 +443,8 @@ async function start() {
   startupIgnoreUntil = Date.now() + 6000;
 
   chrome.storage.onChanged.addListener((changes) => {
+    clearPendingAlert();
+
     if (changes.enabled) {
       settings.enabled = changes.enabled.newValue;
     }
@@ -317,7 +462,7 @@ async function start() {
     }
 
     if (changes.channelSettings) {
-      settings.channelSettings = changes.channelSettings.newValue || {};
+      settings.channelSettings = normalizeChannelSettingsMap(changes.channelSettings.newValue || {});
     }
 
     if (changes.ignoreOwnMessages) {
@@ -343,23 +488,29 @@ async function start() {
     if (changes.alertDebounceMs) {
       settings.alertDebounceMs = Number(changes.alertDebounceMs.newValue || 1200);
     }
+
+    updateExtensionBadge();
   });
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'setSettings') {
+      clearPendingAlert();
+
       settings = { ...settings, ...message.settings };
       settings.sounds = Array.isArray(message.settings.sounds) && message.settings.sounds.length ? message.settings.sounds : DEFAULT_SOUNDS;
-      settings.channelSettings = message.settings.channelSettings || {};
+      settings.channelSettings = normalizeChannelSettingsMap(message.settings.channelSettings || {});
       settings.ignoreOwnMessages = Boolean(message.settings.ignoreOwnMessages);
       settings.mentionOnly = Boolean(message.settings.mentionOnly);
       settings.myUsername = String(message.settings.myUsername || '');
       settings.ignoredUsers = Array.isArray(message.settings.ignoredUsers) ? message.settings.ignoredUsers : DEFAULT_SETTINGS.ignoredUsers;
       settings.alertCooldownMs = Number(message.settings.alertCooldownMs || settings.alertCooldownMs || 0);
       settings.alertDebounceMs = Number(message.settings.alertDebounceMs || settings.alertDebounceMs || 1200);
+      updateExtensionBadge();
       sendResponse({ ok: true });
     }
   });
 
+  updateExtensionBadge();
   setupObserver();
 }
 

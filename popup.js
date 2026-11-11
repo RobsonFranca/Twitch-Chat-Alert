@@ -31,7 +31,9 @@ const customSoundUrl = document.getElementById('customSoundUrl');
 const addSoundButton = document.getElementById('addSoundButton');
 const channelNameInput = document.getElementById('channelNameInput');
 const channelToggle = document.getElementById('channelToggle');
+const channelToggleLabel = document.getElementById('channelToggleLabel');
 const currentChannelText = document.getElementById('currentChannelText');
+const channelStatusBadge = document.getElementById('channelStatusBadge');
 const ignoreOwnMessagesToggle = document.getElementById('ignoreOwnMessagesToggle');
 const mentionOnlyToggle = document.getElementById('mentionOnlyToggle');
 const myUsernameInput = document.getElementById('myUsernameInput');
@@ -41,11 +43,29 @@ const alertDebounceSlider = document.getElementById('alertDebounceSlider');
 const alertDebounceValue = document.getElementById('alertDebounceValue');
 const ignoredUsersInput = document.getElementById('ignoredUsersInput');
 
+function normalizeChannelSettingsMap(map) {
+  if (!map || typeof map !== 'object') {
+    return {};
+  }
+
+  const normalized = {};
+  Object.entries(map).forEach(([key, value]) => {
+    const normalizedKey = normalizeChannelName(key);
+    if (!normalizedKey) {
+      return;
+    }
+
+    normalized[normalizedKey] = value && typeof value === 'object' ? { ...value } : { enabled: Boolean(value) };
+  });
+
+  return normalized;
+}
+
 async function getStorageSettings() {
   const result = await chrome.storage.local.get(DEFAULT_SETTINGS);
   const settings = { ...DEFAULT_SETTINGS, ...result };
   settings.sounds = Array.isArray(result.sounds) && result.sounds.length ? result.sounds : DEFAULT_SOUNDS;
-  settings.channelSettings = result.channelSettings || {};
+  settings.channelSettings = normalizeChannelSettingsMap(result.channelSettings || {});
   return settings;
 }
 
@@ -63,6 +83,26 @@ async function renderSoundOptions() {
   soundSelect.value = settings.selectedSoundId || settings.sounds[0]?.id || '';
 }
 
+function normalizeChannelName(value) {
+  let raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const url = new URL(raw);
+    raw = url.pathname;
+  } catch {
+    // keeps raw value when it is not a full URL
+  }
+
+  raw = raw.toLowerCase().replace(/^@/, '');
+  const segments = raw.split('/').filter(Boolean);
+  const candidate = segments.find((segment) => !['chat', 'videos', 'directory', 'popout', 'moderator', 'dashboard', 'settings', 'search'].includes(segment.toLowerCase()));
+  const cleaned = (candidate || segments[0] || raw).replace(/^@/, '').trim();
+  return cleaned.toLowerCase();
+}
+
 async function getCurrentTwitchChannel() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const [tab] = tabs;
@@ -73,11 +113,40 @@ async function getCurrentTwitchChannel() {
 
   try {
     const url = new URL(tab.url);
-    const match = url.pathname.match(/^\/([^/?#]+)/);
-    return match ? match[1].trim().toLowerCase() : '';
+    if (!url.hostname.endsWith('.twitch.tv') && url.hostname !== 'twitch.tv') {
+      return '';
+    }
+
+    const segments = url.pathname.split('/').filter(Boolean);
+    const candidate = segments.find((segment) => !['chat', 'videos', 'directory', 'popout', 'moderator', 'dashboard', 'settings', 'search'].includes(segment.toLowerCase()));
+    return normalizeChannelName(candidate || segments[0] || '');
   } catch {
     return '';
   }
+}
+
+async function isCurrentTabOnTwitch() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [tab] = tabs;
+
+  if (!tab?.url) {
+    return false;
+  }
+
+  try {
+    const url = new URL(tab.url);
+    return url.hostname.endsWith('.twitch.tv') || url.hostname === 'twitch.tv';
+  } catch {
+    return false;
+  }
+}
+
+function updateChannelStatus() {
+  const isEnabled = channelToggle.checked;
+  channelToggleLabel.textContent = isEnabled ? 'Canal ativado' : 'Ativar canal';
+  channelStatusBadge.textContent = isEnabled ? 'Ligado' : 'Desligado';
+  channelStatusBadge.classList.toggle('status-on', isEnabled);
+  channelStatusBadge.classList.toggle('status-off', !isEnabled);
 }
 
 async function syncChannelFields() {
@@ -88,15 +157,77 @@ async function syncChannelFields() {
     channelNameInput.value = currentChannel;
     currentChannelText.textContent = `Canal atual: ${currentChannel}`;
   } else {
+    channelNameInput.value = '';
     currentChannelText.textContent = 'Abra uma stream da Twitch para usar o canal atual';
   }
 
-  const channel = (channelNameInput.value || currentChannel || '').trim().toLowerCase();
-  channelToggle.disabled = !channel;
-  channelToggle.checked = Boolean(channel && settings.channelSettings?.[channel]?.enabled);
+  const channel = normalizeChannelName(channelNameInput.value || currentChannel || '');
+  const isOnTwitch = Boolean(channel);
+  channelToggle.disabled = !isOnTwitch;
+  channelToggle.checked = Boolean(isOnTwitch && settings.channelSettings?.[channel]?.enabled === true);
+  updateChannelStatus();
+}
+
+function setStatusIcon(color) {
+  if (!chrome?.action) {
+    return;
+  }
+
+  try {
+    const sizes = [16, 32, 48, 128];
+    const imageData = {};
+
+    sizes.forEach((size) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      ctx.clearRect(0, 0, size, size);
+
+      ctx.fillStyle = '#1f2937';
+      ctx.fillRect(0, 0, size, size);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = `700 ${size * 0.72}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('T', size / 2, size / 2 + 1);
+
+      const dotRadius = Math.max(3, size * 0.18);
+      const dotX = size - dotRadius - Math.max(1, size * 0.12);
+      const dotY = size - dotRadius - Math.max(1, size * 0.12);
+
+      ctx.beginPath();
+      ctx.fillStyle = color;
+      ctx.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      imageData[size] = ctx.getImageData(0, 0, size, size);
+    });
+
+    chrome.action.setIcon({ imageData });
+  } catch (error) {
+    // Ignore badge update failures silently.
+  }
+}
+
+function updateExtensionBadgeForCurrentTab(state) {
+  const badgeMap = {
+    gray: '#6b7280',
+    green: '#22c55e',
+    red: '#ef4444'
+  };
+
+  const resolvedState = badgeMap[state] || badgeMap.gray;
+  setStatusIcon(resolvedState);
 }
 
 async function saveSettings({ updateChannel = false } = {}) {
+  if (!(await isCurrentTabOnTwitch())) {
+    return;
+  }
+
   const settings = await getStorageSettings();
   const nextSettings = {
     ...settings,
@@ -117,13 +248,32 @@ async function saveSettings({ updateChannel = false } = {}) {
   };
 
   if (updateChannel) {
-    const channel = (channelNameInput.value || '').trim().toLowerCase();
+    const channel = normalizeChannelName(channelNameInput.value || '');
     if (channel) {
-      nextSettings.channelSettings[channel] = { enabled: channelToggle.checked };
+      nextSettings.channelSettings = normalizeChannelSettingsMap({
+        ...nextSettings.channelSettings,
+        [channel]: { enabled: channelToggle.checked }
+      });
     }
   }
 
+  nextSettings.channelSettings = normalizeChannelSettingsMap(nextSettings.channelSettings || {});
   await chrome.storage.local.set(nextSettings);
+
+  const channelName = normalizeChannelName(channelNameInput.value || (await getCurrentTwitchChannel()) || '');
+  const isGloballyEnabled = nextSettings.enabled;
+  const currentChannelState = channelName ? nextSettings.channelSettings?.[channelName] : undefined;
+  const isChannelEnabledForCurrentTab = channelName
+    ? Boolean(currentChannelState?.enabled === true)
+    : isGloballyEnabled;
+
+  if (!isGloballyEnabled) {
+    updateExtensionBadgeForCurrentTab('gray');
+  } else if (channelName && !isChannelEnabledForCurrentTab) {
+    updateExtensionBadgeForCurrentTab('red');
+  } else {
+    updateExtensionBadgeForCurrentTab('green');
+  }
 
   chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
     if (tab?.id) {
@@ -205,6 +355,45 @@ async function addCustomSound() {
 
 document.addEventListener('DOMContentLoaded', async () => {
   const settings = await getStorageSettings();
+  const canUseExtension = await isCurrentTabOnTwitch();
+  const siteGuardMessage = document.getElementById('siteGuardMessage');
+
+  const disablePopupControls = () => {
+    [enabledToggle, volumeSlider, testButton, soundSelect, customSoundName, customSoundUrl, addSoundButton,
+      channelNameInput, channelToggle, ignoreOwnMessagesToggle, mentionOnlyToggle, myUsernameInput,
+      alertCooldownSlider, alertDebounceSlider, ignoredUsersInput].forEach((element) => {
+      if (element) {
+        element.disabled = true;
+      }
+    });
+
+    updateExtensionBadgeForCurrentTab('gray');
+
+    if (siteGuardMessage) {
+      siteGuardMessage.classList.remove('hidden');
+    }
+  };
+
+  const enablePopupControls = () => {
+    [enabledToggle, volumeSlider, testButton, soundSelect, customSoundName, customSoundUrl, addSoundButton,
+      channelNameInput, channelToggle, ignoreOwnMessagesToggle, mentionOnlyToggle, myUsernameInput,
+      alertCooldownSlider, alertDebounceSlider, ignoredUsersInput].forEach((element) => {
+      if (element) {
+        element.disabled = false;
+      }
+    });
+
+    if (siteGuardMessage) {
+      siteGuardMessage.classList.add('hidden');
+    }
+  };
+
+  if (!canUseExtension) {
+    disablePopupControls();
+  } else {
+    enablePopupControls();
+  }
+
   enabledToggle.checked = settings.enabled;
   volumeSlider.value = String(settings.volume);
   alertCooldownSlider.value = String(settings.alertCooldownMs || 2000);
@@ -218,6 +407,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   await renderSoundOptions();
   soundSelect.value = settings.selectedSoundId || settings.sounds[0]?.id || '';
   await syncChannelFields();
+
+  if (!canUseExtension) {
+    updateExtensionBadgeForCurrentTab('gray');
+  } else {
+    const activeChannel = normalizeChannelName(channelNameInput.value || (await getCurrentTwitchChannel()) || '');
+    const channelState = activeChannel ? settings.channelSettings?.[activeChannel] : undefined;
+
+    if (!settings.enabled) {
+      updateExtensionBadgeForCurrentTab('gray');
+    } else if (activeChannel && channelState?.enabled !== true) {
+      updateExtensionBadgeForCurrentTab('red');
+    } else {
+      updateExtensionBadgeForCurrentTab('green');
+    }
+  }
 
   const tabButtons = document.querySelectorAll('.tab-button');
   const tabContents = document.querySelectorAll('.tab-content');
@@ -256,7 +460,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   ignoredUsersInput.addEventListener('change', () => saveSettings());
   testButton.addEventListener('click', playTestSound);
   addSoundButton.addEventListener('click', addCustomSound);
-  channelToggle.addEventListener('change', () => saveSettings({ updateChannel: true }));
+  channelToggle.addEventListener('change', async () => {
+    updateChannelStatus();
+    await saveSettings({ updateChannel: true });
+  });
   channelNameInput.addEventListener('change', async () => {
     await syncChannelFields();
     await saveSettings({ updateChannel: true });
